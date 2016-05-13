@@ -1,0 +1,206 @@
+---
+title: "Untitled"
+author: "Tomasz Kurowski"
+date: "May 9, 2016"
+output: html_document
+---
+
+
+<style>
+    .side-note {
+        font-size: 0.9em; padding: 1em 2em;
+        border: solid 1px #ddd;
+        border-width: 1px 0;
+        margin: 2em 4em;
+    }
+    .side-note:before {
+        content: "side note "; text-transform: uppercase;
+        font-size: 0.8em;
+    }
+    .side-note h5 {
+        font-size: 1em; font-weight: bold;
+    }
+
+    figure {font-style: italic; margin-bottom: 1em;}
+</style>
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(echo=TRUE, fig.path='plots/',comment=NA,cache=TRUE)
+```
+
+```{r, echo=FALSE}
+# go to project dir
+if (getwd() != "/home/tkurowski/Coursera/PML") setwd("~/Coursera/PML/")
+```
+
+## Synopsis?
+
+## Getting the Data
+
+```{r, echo=FALSE}
+for (fname in c("pml-training.csv", "pml-testing.csv"))
+    if (!file.exists(fname)) {
+        path <- paste("https://d396qusza40orc.cloudfront.net/predmachlearn", fname,
+                  sep="/")
+        print(fname)
+        download.file(path, fname)
+    }
+```
+```{r}
+df <- read.csv("pml-training.csv")
+```
+
+## Cleaning
+
+```{r withna}
+with.na <- sapply(names(df), function (n) sum(is.na(df[[n]]))) # count NA
+with.na <- with.na[with.na > 0] # filter columns with NA
+```
+
+`r length(with.na)` columns in the data are `r round(min(with.na)/dim(df)[1], 3)*100`%
+`NA` (missing values).
+
+<div class="side-note">
+
+##### Assesing the irrelevance of the (almost) empty columns
+
+Being almost empty does not, by itself, make the columns useless.
+Figure 1. shows the classification tree built using the near-empty columns.
+
+```{r rpart, echo=FALSE}
+library(caret)
+set.seed(123)
+m.with.na <- train(classe ~ .,
+                   data = df[, c('classe', names(with.na))],
+                   method="rpart")
+```
+
+<figure>
+```{r rpart_tree, echo=FALSE, fig.width=4, fig.height=2.6}
+par('mar', 'cex') -> pars
+par(mar=c(0,0,0,0), cex=.75)
+plot(m.with.na$finalModel, margin=.2); text(m.with.na$finalModel)
+par(pars)
+```
+  <figcaption>
+  Fig. 1. Classification tree built with `rpart` on near-empty columns.
+  </figcaption>
+</figure>
+Only two of them are of any use and the estimated accuracy is only 
+`r round(m.with.na$results[1,2], 3)`.
+Besides, the tree can only be applied to records where given columns
+have proper values.
+
+</div>
+
+We discard irrelevant columns.
+
+```{r irrelevant}
+irrelevant <- c(names(with.na), 'X', 'user_name', 'cvtd_timestamp',
+                'raw_timestamp_part_1', 'raw_timestamp_part_2')
+df[irrelevant] <- NULL
+```
+
+<div class="side-note">
+##### Is `user_name` (ir)relevant?
+
+`user_name` might be a powerful decision variable for the data set.
+However, this would yield a very narrow model, unusable for greater audience.
+</div>
+
+`read.csv` coerced many variables to factors. We bring them back to their
+original numeric domain.
+
+```{r clean}
+# NOTE: this clean function must also be applied to the test set (for prediction)
+clean <- function (df) {
+    for (n in names(df))
+        if (n != "classe" && class(df[[n]]) == 'factor')
+            df[[n]] <- as.numeric(df[[n]])
+    df
+}
+df <- clean(df)
+```
+
+## Partitioning
+
+The `caret` package uses cross-validation to find the best fit; we will additionally
+simulate a test set to better evaluate model accuracy.
+
+```{r partition}
+set.seed(4321)
+intr <- createDataPartition(df$classe, p=0.7, list=FALSE)
+tr <- df[intr, ]
+tst <- df[-intr, ]
+```
+
+## Preliminary Feature Selection
+
+The training dataset now contains `r dim(tr)[1]` rows, `r length(tr)` columns each.
+To train such a big data set (with `caret`'s cross-validation and re-fitting)
+one needs significant amout of time or computing power.
+
+We will therfore perform a very simple feature selection that will, nevertheless,
+turn out quite effective.
+
+The idea is to fit a multinomial linear regression model using all variables
+and then select those with lowest p-values.
+
+```{r, echo=FALSE}
+# again: load pre-saved objects from disk; the generating code is below:
+mnm <- readRDS("mnm.rds")
+smry <- readRDS("smry.rds")
+```
+```{r feature.selection, eval=FALSE}
+library(nnet) # for multinom[ial] model
+mnm <- multinom(classe ~ ., data = tr)
+smry <- summary(mnm)
+```
+
+We compute z-value, and associated p-values for each variable. We then order
+the variables by (ascending) p-values.
+```{r}
+z <- smry$coefficients / smry$standard.errors
+p <- (1 - pnorm(abs(z))) * 2; # 2-tail
+p <- p[,-1]                   # ignore intercept
+p <- sort(apply(p, 2, sum))   # best features first
+```
+
+<figure>
+```{r bestfeatures, echo=FALSE}
+library(lattice)
+set.seed(12345)
+intr <- createDataPartition(tr$classe, p=0.02, list=FALSE)
+d <- tr[intr,]
+splom(d[names(p[1:5])], groups=d$classe, main="Top 5 variables")
+```
+  <figcaption>
+  </figcaption>
+<figure>
+## Machine Learning
+
+```{r, echo=FALSE}
+# The model was built when doing experiments in the console
+# In order not to waste time refitting, it's been saved to a file.
+# The actual training code is in the next chunk
+mrf <- readRDS('mrf.rds')
+```
+```{r train, eval=FALSE}
+mrf <- train(classe ~ ., 
+             data = tr[, c('classe', names(p[1:20]))],
+             method = "rf")
+```
+```{r}
+confusionMatrix(predict(mrf, tst), tst$classe)
+```
+
+library(lattice)
+set.seed(12345)
+intr <- createDataPartition(tr$classe, p=0.05, list=FALSE)
+d <- tr[intr,]
+splom(d[names(p[1:6])], groups=d$classe)
+
+#########
+Mysz!
+tds <- read.csv("pml-testing.csv")
+df <- tds
