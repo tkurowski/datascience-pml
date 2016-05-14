@@ -33,7 +33,10 @@ knitr::opts_chunk$set(echo=TRUE, fig.path='plots/',comment=NA,cache=TRUE)
 if (getwd() != "/home/tkurowski/Coursera/PML") setwd("~/Coursera/PML/")
 ```
 
-## Synopsis?
+## Executive Summary
+
+The full `R` code can be found at LINK_TO_REPO and is considered an integral
+part of this report.
 
 ## Getting the Data
 
@@ -64,7 +67,8 @@ with.na <- with.na[with.na > 0] # filter columns with NA
 
 ##### Assesing the irrelevance of the (almost) empty columns
 
-Being almost empty does not, by itself, make the columns useless.
+Being almost empty does not, by itself, make the columns useless
+(what if the few available values happen to determine the `classe` perfectly?).
 Figure 1. shows the classification tree built using the near-empty columns.
 
 ```{r rpart, echo=FALSE}
@@ -93,18 +97,20 @@ have proper values.
 
 </div>
 
-We discard irrelevant columns.
+We discard irrelevant columns. These include date and time variables,
+row number (`X`), `new_window` (yes-no factor that is "no"
+`r round(sum(df$new_window == 'no')/dim(df)[1] * 100)`% of time) and `user_name`.
 
 ```{r irrelevant}
-irrelevant <- c(names(with.na), 'X', 'user_name', 'cvtd_timestamp',
-                'raw_timestamp_part_1', 'raw_timestamp_part_2')
+irrelevant <- c(names(with.na), 'X', 'user_name', 'new_window',
+                'cvtd_timestamp', 'raw_timestamp_part_1', 'raw_timestamp_part_2')
 df[irrelevant] <- NULL
 ```
 
 <div class="side-note">
 ##### Is `user_name` (ir)relevant?
 
-`user_name` might be a powerful decision variable for the data set.
+In theory, `user_name` might be a powerful decision variable for the data set.
 However, this would yield a very narrow model, unusable for greater audience.
 </div>
 
@@ -137,9 +143,8 @@ tst <- df[-intr, ]
 ## Preliminary Feature Selection
 
 The training dataset now contains `r dim(tr)[1]` rows, `r length(tr)` columns each.
-To train such a big data set (with `caret`'s cross-validation and re-fitting)
-one needs significant amout of time or computing power.
-
+To train such a big data set (with `caret`'s built in cross-validation/bootstrap,
+and feature selection) one needs significant amout of time or computing power.
 We will therfore perform a very simple feature selection that will, nevertheless,
 turn out quite effective.
 
@@ -147,7 +152,11 @@ The idea is to fit a multinomial linear regression model using all variables
 and then select those with lowest p-values.
 
 ```{r, echo=FALSE}
-# again: load pre-saved objects from disk; the generating code is below:
+#######################################################################
+# The objects were created when doing experiments in the console.     #
+# They've been saved to a file, so as not to waste time re-building.  #
+# The following chunk contains the actual (creation) code.            #
+#######################################################################
 mnm <- readRDS("mnm.rds")
 smry <- readRDS("smry.rds")
 ```
@@ -157,8 +166,17 @@ mnm <- multinom(classe ~ ., data = tr)
 smry <- summary(mnm)
 ```
 
+<div class="side-note">
+##### On linear model feature selection
+Of course, lienear model selection is an art in and of itself. What we do
+here is an oversimplified version of _backward stepwise selection_. 
+What we later call "best" or "top" variables might be far from being good at all.
+They do work all right in this particular case, i.e. they lead to
+a highly accurate model of signifficantly reduced size.
+</div>
+
 We compute z-value, and associated p-values for each variable. We then order
-the variables by (ascending) p-values.
+the variables by p-values (smallest first).
 ```{r}
 z <- smry$coefficients / smry$standard.errors
 p <- (1 - pnorm(abs(z))) * 2; # 2-tail
@@ -172,35 +190,77 @@ library(lattice)
 set.seed(12345)
 intr <- createDataPartition(tr$classe, p=0.02, list=FALSE)
 d <- tr[intr,]
-splom(d[names(p[1:5])], groups=d$classe, main="Top 5 variables")
+splom(d[names(p[10:15])], groups=d$classe, varname.cex=.7, axis.text.cex=0)
 ```
   <figcaption>
+  Fig. 2. The first five (of 20) variables that will be used
+  to train the final model. Notice that we can already see small regions
+  of homogenous color (`classe`). The plot was made using a 2% of the
+  training data.
   </figcaption>
 <figure>
-## Machine Learning
 
+## Training a random forest model
+We choose 20 "best" variables and fit a random forest model.
 ```{r, echo=FALSE}
-# The model was built when doing experiments in the console
-# In order not to waste time refitting, it's been saved to a file.
-# The actual training code is in the next chunk
+#######################################################################
+# The objects were created when doing experiments in the console.     #
+# They've been saved to a file, so as not to waste time re-building.  #
+# The following chunk contains the actual (creation) code.            #
+#######################################################################
 mrf <- readRDS('mrf.rds')
 ```
 ```{r train, eval=FALSE}
 mrf <- train(classe ~ ., 
-             data = tr[, c('classe', names(p[1:20]))],
+             data = tr[, c('classe', names(p[1:20]))], # 20 'best' features
              method = "rf")
+# Now go, make yourself a cup of coffee!
 ```
+```{r, echo=FALSE}
+mrf
+```
+<figure>
+```{r densityplot, echo=FALSE,fig.width=8, fig.height=4}
+print(densityplot(mrf), position=c(0, 0, .4, 1), more=T)
+print(plot(varImp(mrf)), position=c(0.4, 0, 1, 1))
+```
+  <figcaption>
+  Fig. 3. Left: within-model accuracy distribution. The expected value is 0.996.
+  Right: variables' importance (mean decrease in node impurity scaled to 100,
+  e.g. _mean decrease gini_ for `num_window` is
+  `r round(randomForest::importance(mrf$finalModel)['num_window',], 2)`)
+  </figcaption>
+</figure>
+
+<figure>
+```{r errrate, echo=FALSE, fig.width=6, fig.height=4}
+plot(mrf$finalModel, main="")
+legend("topright", colnames(mrf$finalModel$err.rate), fill=1:6)
+```
+  <figcaption>
+  Fig. 4. Error rate (per class and "out-of-bag") as a function of number
+  of trees. It decreases quickly (until the number of trees is about 50),
+  and then stabilizes below 0.01.
+  </figcaption>
+</figure>
+
+## Results and summary
 ```{r}
 confusionMatrix(predict(mrf, tst), tst$classe)
 ```
 
-library(lattice)
-set.seed(12345)
-intr <- createDataPartition(tr$classe, p=0.05, list=FALSE)
-d <- tr[intr,]
-splom(d[names(p[1:6])], groups=d$classe)
+The accuracy of test set prediction is 0.9978. And, indeed, applied onto
+the "true" test set (20 examples without `classe` label in `pml-training.csv')
+the model managed 100% accuracy.
 
-#########
-Mysz!
-tds <- read.csv("pml-testing.csv")
-df <- tds
+The random forest model is ineed a powerful technique. It is hardly surprising
+that it was chosen as the default method of the `caret` packages's `train`
+function. All other parameters were also left to their default values,
+and the final model's good results are a proof of great knowledge
+and experience of the package authors.
+
+Simplified feature (pre)selection with multinomial regression was an experiment
+aimed only at saving time. It did work well and seemingly did not much affect
+the accuracy.
+
+## References
