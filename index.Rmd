@@ -26,7 +26,7 @@ output: html_document
 </style>
 
 ```{r, echo=FALSE}
-knitr::opts_chunk$set(echo=TRUE, fig.path='plots/',comment=NA,cache=TRUE)
+knitr::opts_chunk$set(echo=TRUE, fig.path='plots/',comment=NA,cache=TRUE,messages=F)
 ```
 
 ```{r, echo=FALSE}
@@ -43,7 +43,7 @@ of weight lifting exercises from sensor measurements.
 - the data is explored and cleaned
 - preliminary feature selection is performed using multinomial regression
 - random forest model is fit using [`caret` package][caret]
-- and its performance evaluated
+- and its performance is evaluated
 
 The full `R` source code can be found at [project's github page](https://github.com/tkurowski/datascience-pml) and is considered an integral
 part of this report.
@@ -72,9 +72,9 @@ They presented their results at the 4th Augmented Human (AH) International
 Conference in 2013, in a research paper [Qualitative Activity Recognition
 of Weight Lifting Exercises][dataset].
 
-In this analysis we will use the same dataset and build a classification model
+In this analysis we will use the same data set and build a classification model
 for predicting `classe` dependent variable using (a subset of) over 150
-depended variables collected with four different sensors.
+independed variables collected with four different sensors.
 
 ## Getting and Exploring the Data
 
@@ -94,7 +94,7 @@ for (fname in c("pml-training.csv", "pml-testing.csv"))
 df <- read.csv("pml-training.csv")
 ```
 
-The data contains `r dim(df)[1]` records of `r dim(df)[2]` columns.
+The training data contains `r dim(df)[1]` records and `r dim(df)[2]` columns.
 
 <figure>
 ```{r exploryplots, echo=FALSE, fig.align="center"}
@@ -200,7 +200,7 @@ df <- clean(df)
 ## Partitioning
 
 The `caret` package uses techniques like cross-validation or bagging to find
-the best fit; we will additionally simulate a test set to better evaluate model accuracy.
+the best fit; we will additionally simulate a test set to better evaluate model's accuracy.
 
 ```{r partition}
 set.seed(4321)
@@ -211,7 +211,7 @@ tst <- df[-intr, ]
 
 ## Preliminary Feature Selection
 
-The training dataset now contains `r dim(tr)[1]` rows, `r length(tr)` columns each.
+The training data now contains `r dim(tr)[1]` rows, `r length(tr)` columns each.
 To train such a big data set (with `caret`'s built in machinery) one needs significant amount of time or computing power.
 We will therefore perform a very simple feature selection that will, nevertheless,
 turn out quite effective.
