@@ -26,7 +26,8 @@ output: html_document
 </style>
 
 ```{r, echo=FALSE}
-knitr::opts_chunk$set(echo=TRUE, fig.path='plots/',comment=NA,cache=TRUE,messages=F)
+knitr::opts_chunk$set(echo=TRUE, fig.path='plots/',comment=NA,cache=F,
+                      message=F, warning=F)
 ```
 
 ```{r, echo=FALSE}
@@ -91,6 +92,7 @@ for (fname in c("pml-training.csv", "pml-testing.csv"))
     }
 ```
 ```{r}
+library(caret)
 df <- read.csv("pml-training.csv")
 ```
 
@@ -98,7 +100,6 @@ The training data contains `r dim(df)[1]` records and `r dim(df)[2]` columns.
 
 <figure>
 ```{r exploryplots, echo=FALSE, fig.align="center"}
-library(caret)
 library(lattice)
 
 lvl.plt <- levelplot(table(df[,c('classe', 'user_name')]), outer=F,
@@ -254,17 +255,19 @@ p <- sort(apply(p, 2, sum))   # best features first
 The righ-hand panel of figure 1 presents a scatter plot matrix of 5 (of 20) variables that will be used to train the final model.
 
 ## Training a Random Forest Model
-We choose 20 "best" variables and fit a random forest model.
+We choose 20 "best" variables and fit a random forest model using
+k-fold cross-validation, k = 5.
 ```{r, echo=FALSE}
 #######################################################################
 # The objects were created when doing experiments in the console.     #
 # They've been saved to a file, so as not to waste time re-building.  #
 # The following chunk contains the actual (creation) code.            #
 #######################################################################
-mrf <- readRDS('mrf.rds')
+mrf <- readRDS('mrf2704.rds')
 ```
 ```{r train, eval=FALSE}
-mrf <- train(classe ~ ., 
+set.seed(2704)
+mrf <- train(classe ~ ., trControl = trainControl(method='cv', number=5),
              data = tr[, c('classe', names(p[1:20]))], # 20 'best' features
              method = "rf")
 # Now go, make yourself a cup of coffee!
@@ -272,13 +275,17 @@ mrf <- train(classe ~ .,
 ```{r, echo=FALSE}
 mrf
 ```
+
+Model's expected accuracy (estimated with 5-fold cross-validation) is 0.9966 (see
+figure 3).
+
 <figure>
 ```{r densityplot, echo=FALSE,fig.width=8, fig.height=4, fig.align="center"}
 print(densityplot(mrf), position=c(0, 0, .4, 1), more=T)
 print(plot(varImp(mrf, scale=FALSE)), position=c(0.4, 0, 1, 1))
 ```
   <figcaption>
-  **Fig. 3.** Left: within-model accuracy distribution. The expected value is 0.996.
+  **Fig. 3.** Left: within-model accuracy distribution. The expected value is 0.9966.
   Right: variables' importance computed as the mean decrease in node impurity
   (gini index).
   </figcaption>
@@ -310,7 +317,7 @@ the model achieved 100% accuracy.
 
 _Random forest_ is ineed a powerful technique. It is hardly surprising
 that it was chosen as the default method of the `caret` packages's `train`
-function. All other parameters were also left to their default values,
+function. Many other parameters were also left to their default values,
 and the final model's good results are proof of great knowledge
 and experience of the package authors.
 
